@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The farm is stdlib only and dispatches to the tools rather than
+      # importing them, so its suite needs neither engine installed.
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -q
+
+  image:
+    # The whole point of this repo is that it deploys, so the image has to
+    # build on every push or the claim is unverified. Engines are skipped
+    # here: they are installed from git tags that only exist once the
+    # sibling repos are published, and this job is about the image, not
+    # about them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: shutter-farm:ci
+          build-args: |
+            INSTALL_ENGINES=false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: The container answers for itself
+        run: |
+          docker run --rm shutter-farm:ci --version
+          docker run --rm shutter-farm:ci status --root /media
+          test "$(docker run --rm --entrypoint id shutter-farm:ci -u)" != "0" \
+            || { echo "image runs as root"; exit 1; }
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Manifests parse and the compose file is valid
+        run: |
+          python -c "
+          import glob, yaml
+          for f in sorted(glob.glob('deploy/k8s/*.yaml')) + ['docker-compose.yml']:
+              docs = [d for d in yaml.safe_load_all(open(f)) if d]
+              assert docs, f
+              print(f, [d.get('kind', 'compose') for d in docs])
+          "
+          bash -n deploy/cloud-run-job.sh
