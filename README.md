@@ -101,8 +101,50 @@ pip install git+https://github.com/keivanmalhani/shutter-farm.git
 ```
 
 ```bash
+shutter-farm doctor --root /Volumes/Archive
+```
+
+```bash
 shutter-farm run --root /Volumes/Archive
 ```
+
+## Before you trust it with a schedule
+
+```bash
+shutter-farm doctor --root /media
+```
+
+Every scheduled job has the same first support ticket: it ran, it did nothing, and the logs are technically complete and humanly useless. The cause is almost always environmental. An engine is not on PATH inside the container. The archive is mounted read-only so the ledger cannot be written, which quietly turns off idempotency and makes every sweep redo everything. `--write` is on against a read-only volume, so all two hundred folders fail identically forever.
+
+`doctor` asks those questions on purpose, before the schedule does:
+
+```text
+  [ok  ] python                        Python 3.11
+  [ok  ] media root                    /media is readable
+  [ok  ] work found                    41 folder(s) with media
+  [FAIL] ledger                        Cannot create /media/.shutter-farm-state.json, /media is read-only
+                                     -> Put the ledger on its own writable volume:
+                                        --state /state/shutter-farm-state.json. This is the normal
+                                        setup when the archive is mounted read-only, which it should be.
+  [ok  ] write mode                    Writes are off.
+  [warn] shutter-select                Not on PATH, so video folders will be skipped
+                                     -> pip install git+https://github.com/keivanmalhani/shutter-select.git
+  [ok  ] shutter-cull                  shutter-cull, installed, does not report a version
+  [ok  ] shutter-cull needs exiftool   present
+  [ok  ] disk space                    412.9 GB free
+  [ok  ] metrics port                  Port 9090 is free
+
+  1 blocking problem(s), 1 warning(s). A sweep will not work until the
+  blocking ones are fixed.
+```
+
+Three rules it holds itself to:
+
+- **Every problem in one pass, not the first one.** Three round trips to fix three things is exactly the support experience this avoids, so nothing bails out early.
+- **A check that cannot tell you what to type is not finished.** Every non-passing line carries the command that fixes it, including the compose and Kubernetes spellings where they differ.
+- **A false alarm is worse than no alarm.** Being on PATH is not the same as being runnable, so the engines are actually executed. But a non-zero `--version` does not mean broken: shutter-cull requires a subcommand and exits 2 on a bare `--version`, so the probe falls back to `--help` rather than sending you to reinstall something that works.
+
+`--json` emits one object per check plus a single `doctor_verdict` line, so it works as a container startup probe. Exit code is 0 when a sweep will work and 1 when it will not, and "neither engine is installed" counts as will not, even though each engine alone is only a warning.
 
 ## Writes are off by default
 
@@ -159,7 +201,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-52 tests, no engines needed: the farm dispatches to the tools rather than importing them, so the suite runs against a fake dispatcher and covers what the farm actually is, which is discovery, idempotency, failure isolation and observability. CI additionally builds the image on every push and asserts it does not run as root, because a repo whose whole argument is "this deploys" should not leave that unverified.
+92 tests, no engines needed: the farm dispatches to the tools rather than importing them, so the suite runs against a fake dispatcher and covers what the farm actually is, which is discovery, idempotency, failure isolation, diagnostics and observability. doctor's environment is injected rather than real, so its tests build a machine broken in one specific way instead of asserting on whatever the runner happens to be sitting on, and they hold identically on a laptop with ffmpeg and in a container without it. CI additionally builds the image on every push and asserts it does not run as root, because a repo whose whole argument is "this deploys" should not leave that unverified.
 
 ## Family
 

@@ -101,8 +101,45 @@ pip install git+https://github.com/keivanmalhani/shutter-farm.git
 ```
 
 ```bash
+shutter-farm doctor --root /Volumes/Archive
+```
+
+```bash
 shutter-farm run --root /Volumes/Archive
 ```
+
+## Antes de confiarle un horario
+
+```bash
+shutter-farm doctor --root /media
+```
+
+Todo trabajo programado tiene el mismo primer ticket de soporte: corrio, no hizo nada, y los logs estan tecnicamente completos y humanamente inutiles. La causa casi siempre es del entorno. Un motor no esta en el PATH dentro del contenedor. El archivo esta montado en solo lectura y el registro no se puede escribir, lo que apaga la idempotencia en silencio y hace que cada pasada rehaga todo. `--write` esta encendido contra un volumen de solo lectura, asi que las doscientas carpetas fallan igual, para siempre.
+
+`doctor` hace esas preguntas a proposito, antes de que las haga el horario:
+
+```text
+  [ok  ] python                        Python 3.11
+  [ok  ] media root                    /media is readable
+  [ok  ] work found                    41 folder(s) with media
+  [FAIL] ledger                        Cannot create /media/.shutter-farm-state.json, /media is read-only
+                                     -> Put the ledger on its own writable volume:
+                                        --state /state/shutter-farm-state.json.
+  [ok  ] write mode                    Writes are off.
+  [warn] shutter-select                Not on PATH, so video folders will be skipped
+  [ok  ] shutter-cull                  shutter-cull, installed, does not report a version
+  [ok  ] disk space                    412.9 GB free
+
+  1 blocking problem(s), 1 warning(s).
+```
+
+Tres reglas que se impone:
+
+- **Todos los problemas en una pasada, no el primero.** Tres viajes de ida y vuelta para arreglar tres cosas es exactamente la experiencia de soporte que esto evita, asi que nada se detiene antes de tiempo.
+- **Un chequeo que no te puede decir que escribir no esta terminado.** Cada linea que no pasa trae el comando que la arregla, incluidas las variantes de compose y de Kubernetes cuando difieren.
+- **Una falsa alarma es peor que ninguna alarma.** Estar en el PATH no es lo mismo que poder ejecutarse, asi que los motores se ejecutan de verdad. Pero un `--version` con codigo distinto de cero no significa roto: shutter-cull exige un subcomando y sale con 2 ante un `--version` pelado, asi que la sonda cae a `--help` en vez de mandarte a reinstalar algo que funciona.
+
+`--json` emite un objeto por chequeo mas una sola linea `doctor_verdict`, asi sirve como sonda de arranque de contenedor. El codigo de salida es 0 cuando una pasada va a funcionar y 1 cuando no, y "ningun motor instalado" cuenta como que no, aunque cada motor por separado sea solo una advertencia.
 
 ## La escritura viene apagada
 
@@ -158,7 +195,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-52 pruebas, sin motores: el farm despacha a las herramientas en lugar de importarlas, asi que la suite corre contra un despachador falso y cubre lo que el farm realmente es, o sea descubrimiento, idempotencia, aislamiento de fallas y observabilidad. CI ademas construye la imagen en cada push y verifica que no corra como root, porque un repo cuyo argumento entero es "esto se despliega" no deberia dejar eso sin verificar.
+92 pruebas, sin motores: el farm despacha a las herramientas en lugar de importarlas, asi que la suite corre contra un despachador falso y cubre lo que el farm realmente es, o sea descubrimiento, idempotencia, aislamiento de fallas y observabilidad. CI ademas construye la imagen en cada push y verifica que no corra como root, porque un repo cuyo argumento entero es "esto se despliega" no deberia dejar eso sin verificar.
 
 ## Familia
 

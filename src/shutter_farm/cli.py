@@ -4,11 +4,16 @@
     shutter-farm serve --root /mnt/archive          sweep on an interval
     shutter-farm status --root /mnt/archive         what the ledger knows
     shutter-farm retry  --root /mnt/archive FOLDER  un-quarantine one folder
+    shutter-farm doctor --root /mnt/archive         will a sweep actually work
 
 run is the shape a Kubernetes Job or a Cloud Run Job wants: do the work,
 exit zero, let the platform own the schedule. serve is for a plain host or
 a long-lived container, and is the only mode that keeps the metrics port
 open across sweeps.
+
+doctor is the one to run first, and the one to ask for when someone reports
+that a scheduled sweep did nothing. It reports every problem it finds in one
+pass with the command that fixes each.
 
 Exit codes: 0 all good, 1 a configuration error, 2 the sweep ran but some
 folders failed. A scheduler can tell "I could not start" from "I ran and
@@ -23,7 +28,8 @@ import sys
 import time
 from pathlib import Path
 
-from shutter_farm import __version__
+from shutter_farm import __version__, doctor
+from shutter_farm.discovery import discover
 from shutter_farm.farm import Farm
 from shutter_farm.observability import excepthook_to_log, log, serve_metrics
 from shutter_farm.state import Ledger
@@ -94,6 +100,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_retry = sub.add_parser("retry", help="clear a folder's record so it runs again")
     common(p_retry)
     p_retry.add_argument("folder", help="Folder path as it appears in status")
+
+    p_doctor = sub.add_parser(
+        "doctor", help="check this machine before trusting it with a schedule")
+    common(p_doctor)
+    p_doctor.add_argument("--write", action="store_true",
+                          default=_env("FARM_WRITE", "").lower() in ("1", "true", "yes"),
+                          help="Check the environment as it would be with writes on. "
+                               "Env: FARM_WRITE")
+    p_doctor.add_argument("--metrics-port", type=int,
+                          default=int(_env("FARM_METRICS_PORT", "0")),
+                          help="Also check this port is bindable. Env: FARM_METRICS_PORT")
+    p_doctor.add_argument("--json", action="store_true",
+                          help="One JSON object per check, for a probe rather than a person")
 
     return parser
 
@@ -186,12 +205,54 @@ def cmd_retry(args) -> int:
     return EXIT_CONFIG
 
 
+def cmd_doctor(args) -> int:
+    """Diagnose before scheduling.
+
+    Deliberately does not bail out when the root is wrong. A person running
+    doctor wants every problem at once, not the first one: three round trips
+    to fix three things is exactly the support experience this avoids."""
+    root = Path(args.root).expanduser() if args.root else Path(".")
+    if args.root:
+        root = root.resolve() if root.exists() else root
+    state = Path(args.state).expanduser() if args.state \
+        else root / f".{DEFAULT_LEDGER_NAME}"
+
+    discovered: int | None = None
+    if root.is_dir() and os.access(root, os.R_OK | os.X_OK):
+        try:
+            discovered = len(discover(root))
+        except OSError:
+            discovered = None
+
+    ctx = doctor.Context(root=root, state=state, write=args.write,
+                         metrics_port=args.metrics_port)
+    checks = doctor.run_checks(ctx, discovered)
+
+    if args.json:
+        for check in checks:
+            log("doctor_check",
+                level={"ok": "info", "warn": "warn", "fail": "error"}[check.status],
+                check=check.name, status=check.status, detail=check.detail,
+                fix=check.fix)
+    else:
+        if not args.root:
+            print("No --root given, checking the tools and this machine only.\n")
+        print(doctor.render(checks))
+
+    workable, summary = doctor.verdict(checks)
+    if args.json:
+        log("doctor_verdict", level="info" if workable else "error",
+            workable=workable, summary=summary)
+    return EXIT_OK if workable else EXIT_CONFIG
+
+
 def main(argv: list[str] | None = None) -> int:
     excepthook_to_log()
     args = build_parser().parse_args(argv)
     handlers = {
         "run": cmd_run, "serve": cmd_serve,
         "status": cmd_status, "retry": cmd_retry,
+        "doctor": cmd_doctor,
     }
     try:
         return handlers[args.command](args)
