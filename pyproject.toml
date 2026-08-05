@@ -26,6 +26,14 @@ dev = ["pytest>=8.0.0"]
 [project.scripts]
 shutter-farm = "shutter_farm.cli:main"
 
+# The suite imports helpers as `from tests.conftest import ...`, which needs the
+# repo root on sys.path. `python -m pytest` adds the current directory for you
+# and the bare `pytest` console script does not, and the workflow runs the bare
+# one, so CI failed with collection errors and zero tests executed while every
+# hand run looked green. Setting it here means both invocations behave the same.
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
