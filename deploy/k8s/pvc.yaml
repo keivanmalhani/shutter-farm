@@ -1,0 +1,34 @@
+# Two volumes, deliberately different.
+#
+# The archive is large, shared, and can be mounted read-only for a dry run.
+# The ledger is tiny and must be writable and durable: it is the only thing
+# standing between a nightly cron and reprocessing an entire archive every
+# night. Separating them means the media mount's access mode is a policy
+# decision rather than a constraint on the farm.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: photo-archive
+  labels:
+    app.kubernetes.io/name: shutter-farm
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 4Ti
+  # Whatever backs the NAS: nfs-client, filestore-csi, longhorn.
+  storageClassName: nfs-client
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: shutter-farm-state
+  labels:
+    app.kubernetes.io/name: shutter-farm
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard

@@ -1,0 +1,101 @@
+# A nightly sweep over an archive volume.
+#
+# The farm is a batch job, not a service, so the schedule belongs to the
+# platform and the container's only job is to run once and exit honestly.
+# concurrencyPolicy Forbid matters: two sweeps over the same volume would
+# both be correct thanks to the ledger, but they would fight for I/O and
+# double the wall clock for no benefit.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shutter-farm
+  labels:
+    app.kubernetes.io/name: shutter-farm
+spec:
+  schedule: "0 3 * * *"
+  timeZone: "America/Mexico_City"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # The ledger makes retries safe, but a job that fails twice is a
+      # signal, not a thing to grind on.
+      backoffLimit: 2
+      # A long sweep should be allowed to finish; a stuck one should not
+      # run into the next night's schedule.
+      activeDeadlineSeconds: 72000
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: shutter-farm
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9090"
+            prometheus.io/path: "/metrics"
+        spec:
+          restartPolicy: Never
+          # Batch work belongs on cheap capacity. Everything about this
+          # design assumes the node can vanish: state is written after
+          # every folder, and SIGTERM finishes the current one and exits.
+          terminationGracePeriodSeconds: 120
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: farm
+              image: ghcr.io/keivanmalhani/shutter-farm:0.1.0
+              args: ["run"]
+              env:
+                - name: FARM_ROOT
+                  value: /media
+                - name: FARM_STATE
+                  value: /state/shutter-farm-state.json
+                # Off by default here too. Turning this on is a deliberate
+                # act, not something a manifest does quietly.
+                - name: FARM_WRITE
+                  value: "false"
+                - name: FARM_TIMEOUT
+                  value: "3600"
+                - name: FARM_METRICS_PORT
+                  value: "9090"
+              ports:
+                - name: metrics
+                  containerPort: 9090
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: "1"
+                  memory: 2Gi
+                limits:
+                  # No CPU limit on purpose: throttling a batch encoder
+                  # wastes wall clock without protecting anything, and the
+                  # request already governs scheduling.
+                  memory: 6Gi
+              volumeMounts:
+                - name: media
+                  mountPath: /media
+                - name: state
+                  mountPath: /state
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: media
+              persistentVolumeClaim:
+                claimName: photo-archive
+            - name: state
+              persistentVolumeClaim:
+                claimName: shutter-farm-state
+            # readOnlyRootFilesystem means scratch space has to be explicit.
+            - name: tmp
+              emptyDir:
+                sizeLimit: 8Gi

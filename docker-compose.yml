@@ -1,0 +1,45 @@
+# The local version of the same thing. A studio machine or a NAS with
+# Docker gets the identical container the cluster would run.
+#
+#   ARCHIVE=~/Pictures docker compose up
+#
+# Dry run by default. Set FARM_WRITE=true only when you have looked at a
+# sweep's output and meant it.
+services:
+  farm:
+    build:
+      context: .
+      args:
+        ENGINE_REF: v0.1.0
+    image: shutter-farm:0.1.0
+    command: ["serve", "--interval", "900"]
+    environment:
+      FARM_ROOT: /media
+      FARM_STATE: /state/shutter-farm-state.json
+      FARM_WRITE: "${FARM_WRITE:-false}"
+      FARM_TIMEOUT: "3600"
+      FARM_METRICS_PORT: "9090"
+    volumes:
+      # Read-only until you decide otherwise. The farm cannot write to the
+      # archive it cannot write to, which is a better guarantee than a flag.
+      - "${ARCHIVE:-./media}:/media:ro"
+      - farm-state:/state
+    ports:
+      - "9090:9090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=8g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9090/healthz',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  farm-state:

@@ -1,0 +1,67 @@
+# A one-off sweep. For a backfill, or for the first run over a new archive.
+#
+#   kubectl apply -f deploy/k8s/job.yaml
+#   kubectl logs -f job/shutter-farm-backfill | jq .
+#
+# The logs are JSON, one object per line, so jq works on them directly and
+# so does Cloud Logging without a parser.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shutter-farm-backfill
+  labels:
+    app.kubernetes.io/name: shutter-farm
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: farm
+          image: ghcr.io/keivanmalhani/shutter-farm:0.1.0
+          # A backfill is exactly when you want a cap: process a hundred
+          # folders, look at the results, then let the CronJob take over.
+          args: ["run", "--max-jobs", "100"]
+          env:
+            - name: FARM_ROOT
+              value: /media
+            - name: FARM_STATE
+              value: /state/shutter-farm-state.json
+            - name: FARM_METRICS_PORT
+              value: "9090"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              memory: 8Gi
+          volumeMounts:
+            - name: media
+              mountPath: /media
+            - name: state
+              mountPath: /state
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: photo-archive
+        - name: state
+          persistentVolumeClaim:
+            claimName: shutter-farm-state
+        - name: tmp
+          emptyDir:
+            sizeLimit: 8Gi
