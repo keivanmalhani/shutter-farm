@@ -6,6 +6,8 @@
 
 English | [Espanol](README.es.md)
 
+![shutter-farm demo: doctor reports every environment problem in one pass with the fix for each](docs/demo.gif)
+
 Point a container at a media volume. It culls the whole archive on a schedule, and never does the same work twice.
 
 `shutter-farm` is the deployment story for the [shutter toolchain](https://github.com/keivanmalhani). It discovers folders that need processing, dispatches each to [shutter-cull](https://github.com/keivanmalhani/shutter-cull) or [shutter-select](https://github.com/keivanmalhani/shutter-select), and keeps a ledger so a nightly cron is idempotent, resumable, and cheap.

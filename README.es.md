@@ -6,6 +6,8 @@
 
 [English](README.md) | Espanol
 
+![Demo de shutter-farm: doctor reporta todos los problemas del entorno en una pasada, con el arreglo de cada uno](docs/demo.gif)
+
 Apunta un contenedor a un volumen de medios. Hace el culling de todo el archivo en horario programado, y nunca repite el mismo trabajo dos veces.
 
 `shutter-farm` es la historia de despliegue de la [familia shutter](https://github.com/keivanmalhani). Descubre las carpetas que necesitan proceso, manda cada una a [shutter-cull](https://github.com/keivanmalhani/shutter-cull) o a [shutter-select](https://github.com/keivanmalhani/shutter-select), y lleva un libro de registro para que un cron nocturno sea idempotente, reanudable y barato.
